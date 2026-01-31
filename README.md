@@ -1,4 +1,4 @@
-# ⚡ RayStack
+# RayStack
 
 A fast, no-nonsense monitor for Pump.fun on Solana.
 
@@ -12,27 +12,28 @@ The logic is pretty simple: it's a producer-consumer setup. One part waits for t
 
 ```mermaid
 graph TD
-    subgraph Network
-        RPC[Solana RPC WSS]
-        Discord[Discord Webhook]
+    subgraph Solana ["Solana Network"]
+        RPC[("RPC Node")]:::sol
     end
 
-    subgraph "RayStack Engine"
-        Listener[("👂 Listener")]
-        Channel{{"⚡ Fast Channel"}}
-        Processor[("⚙️ Processor")]
-
-        Listener -- "Subscribes to logs" --> RPC
-        RPC -- "Stream events" --> Listener
-        Listener -- "Found a match?" --> Channel
-        Channel -- "Send data" --> Processor
-        Processor -- "Parse Mint & Notify" --> Discord
+    subgraph App ["RayStack Engine"]
+        L["Listener"]:::comp
+        B{{"Buffer"}}:::comp
+        H["Handler"]:::comp
     end
 
-    style RayStack Engine fill:#2b2b2b,stroke:#555,color:#fff
-    style Network fill:#000,stroke:#fff,color:#fff
-    style Listener fill:#36454F,stroke:#4caf50
-    style Processor fill:#36454F,stroke:#e91e63
+    subgraph Out ["Output"]
+        D["Discord"]:::dis
+    end
+
+    RPC == "Logs (WSS)" ==> L
+    L -- "Filtered Events" --> B
+    B -- "Async Data" --> H
+    H -- "New Token Alert" --> D
+
+    classDef sol fill:#000,stroke:#14F195,color:#fff,stroke-width:2px;
+    classDef comp fill:#111,stroke:#9945FF,color:#fff,stroke-width:2px;
+    classDef dis fill:#5865F2,stroke:#fff,color:#fff,stroke-width:2px;
 ```
 
 ## Features
