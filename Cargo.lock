@@ -2766,7 +2766,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64 0.21.7",
+ "borsh 1.6.0",
  "bs58",
+ "byteorder",
  "chrono",
  "dotenv",
  "futures",
