@@ -14,25 +14,50 @@ use std::time::Duration;
 use base64::{engine::general_purpose, Engine as _};
 use byteorder::{ByteOrder, LittleEndian};
 
-fn try_parse_metadata(data: &[u8]) -> Option<(String, String)> {
-    let mut offset = 8; // Skip Discriminator (8 bytes)
-    if offset + 4 > data.len() { return None; }
+fn try_parse_metadata_at_offset(data: &[u8], start_offset: usize) -> Option<(String, String)> {
+    let mut offset = start_offset;
+
+    // Safety check for bounds
+    if offset + 4 > data.len() {
+        return None;
+    }
+
+    // Read Name Length
     let name_len = LittleEndian::read_u32(&data[offset..offset+4]) as usize;
     offset += 4;
-    if name_len == 0 || name_len > 50 || offset + name_len > data.len() { return None; }
+
+    // Heuristic Check: Name should be reasonable length (e.g. 1 to 50 chars)
+    if name_len == 0 || name_len > 50 || offset + name_len > data.len() {
+        return None;
+    }
+
+    // Read Name
     let name = match String::from_utf8(data[offset..offset+name_len].to_vec()) {
         Ok(s) => s.trim_matches(char::from(0)).to_string(),
         Err(_) => return None,
     };
     offset += name_len;
-    if offset + 4 > data.len() { return None; }
+
+    // Safety check for Symbol Length
+    if offset + 4 > data.len() {
+        return None;
+    }
+
+    // Read Symbol Length
     let symbol_len = LittleEndian::read_u32(&data[offset..offset+4]) as usize;
     offset += 4;
-    if symbol_len == 0 || symbol_len > 20 || offset + symbol_len > data.len() { return None; }
+
+    // Heuristic Check: Symbol should be reasonable length (e.g. 1 to 20 chars)
+    if symbol_len == 0 || symbol_len > 20 || offset + symbol_len > data.len() {
+        return None;
+    }
+
+    // Read Symbol
     let symbol = match String::from_utf8(data[offset..offset+symbol_len].to_vec()) {
         Ok(s) => s.trim_matches(char::from(0)).to_string(),
         Err(_) => return None,
     };
+
     Some((name, symbol))
 }
 
@@ -105,17 +130,29 @@ pub async fn run_processor(mut rx: mpsc::Receiver<LogMessage>, notifier: Discord
                         }
 
                         // 3. Scan ALL Log Messages for Metadata
+                        // Try offsets: 8 (Standard), 104 (Event with Pubkeys)
                         if let OptionSerializer::Some(log_messages) = &meta.log_messages {
                             for log in log_messages {
                                 if log.starts_with("Program data: ") {
                                     let b64_data = log.trim_start_matches("Program data: ");
                                     if let Ok(decoded) = general_purpose::STANDARD.decode(b64_data) {
-                                        // Try to parse using heuristics
-                                        if let Some((name, symbol)) = try_parse_metadata(&decoded) {
+                                        
+                                        // Attempt Scan at Offset 8
+                                        if let Some((name, symbol)) = try_parse_metadata_at_offset(&decoded, 8) {
                                             token_name = name;
                                             token_symbol = symbol;
-                                            break; // Found it!
+                                            break; 
                                         }
+
+                                        // Attempt Scan at Offset 104
+                                        if let Some((name, symbol)) = try_parse_metadata_at_offset(&decoded, 104) {
+                                            token_name = name;
+                                            token_symbol = symbol;
+                                            break; 
+                                        }
+                                        
+                                        // Debug: Capture the first buffer for debugging if we fail
+                                        // (Only usage here is falling through)
                                     }
                                 }
                             }
@@ -126,6 +163,20 @@ pub async fn run_processor(mut rx: mpsc::Receiver<LogMessage>, notifier: Discord
                     if dev_spend < 0.5 {
                         println!("[REJECTED] Spend: {:.4} SOL | Mint: {} | Ticker: {}", dev_spend, mint_address, token_symbol);
                     } else {
+                        // Debugging Catch-all for UNKNOWN accepted tokens
+                        if token_symbol == "UNKNOWN" {
+                            println!("[DEBUG] ACCEPTED BUT UNKNOWN TICKER. Dumping logs for analysis...");
+                            if let Some(meta) = &tx_details.transaction.meta {
+                                if let OptionSerializer::Some(log_messages) = &meta.log_messages {
+                                    for log in log_messages {
+                                        if log.starts_with("Program data: ") {
+                                            println!("-> Raw Log: {}", log);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         println!("[ACCEPTED] ${} ({}) | Spend: {:.4} SOL | Mint: {} | Sending Alert...", token_symbol, token_name, dev_spend, mint_address);
                         
                         let description = format!(
@@ -136,7 +187,7 @@ pub async fn run_processor(mut rx: mpsc::Receiver<LogMessage>, notifier: Discord
                         let embed = json!({
                             "username": "PumpStack Monitor",
                             "embeds": [{
-                                "title": format!("High Quality Pump.fun Launch: ${}", token_symbol),
+                                "title": format!("HQ Launch: ${}", token_symbol), // Shortened title
                                 "description": description,
                                 "color": 5763719, // Green
                                 "footer": {
