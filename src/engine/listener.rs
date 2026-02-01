@@ -9,6 +9,7 @@ use crate::engine::LogMessage;
 
 pub async fn run_listener(rpc_url: String, tx: mpsc::Sender<LogMessage>) {
     let pump_program_id = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
+    println!("[INFO] Listener starting... connecting to Helius");
 
     loop {
         let safe_url = if rpc_url.contains("?api-key=") {
@@ -20,10 +21,12 @@ pub async fn run_listener(rpc_url: String, tx: mpsc::Sender<LogMessage>) {
         
         info!("Connecting to Solana WebSocket at {}...", safe_url);
         let mut log_count = 0;
+        let mut has_seen_first_log = false;
 
         match PubsubClient::new(&rpc_url).await {
             Ok(pubsub_client) => {
                 info!("Connected. Subscribing to logs for program: {}", pump_program_id);
+                println!("[INFO] WebSocket Connected! Waiting for first log...");
                 
                 let config = RpcTransactionLogsConfig {
                     commitment: Some(CommitmentConfig::confirmed()),
@@ -36,18 +39,20 @@ pub async fn run_listener(rpc_url: String, tx: mpsc::Sender<LogMessage>) {
                     Ok((mut stream, _unsubscribe)) => {
                         info!("Pump.fun Subscription active. Listening for events...");
                         
-                        // Loop over the stream
                         while let Some(response) = stream.next().await {
-                            log_count += 1;
-                            if log_count % 100 == 0 {
-                                info!("💓 Heartbeat: Monitoring Pump.fun... Scanned {} logs.", log_count);
+                            if !has_seen_first_log {
+                                println!("[DEBUG] FIRST LOG RECEIVED (Sanity Check):\n{:?}", response.value.logs);
+                                has_seen_first_log = true;
                             }
 
-                            // response.value is RpcLogsResponse
+                            log_count += 1;
+                            if log_count % 50 == 0 {
+                                println!("[INFO] Still listening... processed {} logs so far", log_count);
+                            }
+
                             let signature = response.value.signature;
                             let logs = response.value.logs;
                             
-                            // Pump.fun specific filter: "Instruction: Create"
                             let log_string = logs.join("\n");
                             if log_string.contains("Instruction: Create") {
                                 let msg = LogMessage {
@@ -57,20 +62,17 @@ pub async fn run_listener(rpc_url: String, tx: mpsc::Sender<LogMessage>) {
                                 
                                 if let Err(e) = tx.send(msg).await {
                                     error!("Failed to send log to processor: {}", e);
-                                    break; // Channel closed
+                                    println!("[WARN] Parse Failed: Channel Send Error");
+                                    break;
                                 }
                             }
                         }
                         warn!("WebSocket stream ended unexpectedly.");
                     },
-                    Err(e) => {
-                        error!("Failed to subscribe to logs: {}", e);
-                    }
+                    Err(e) => error!("Failed to subscribe to logs: {}", e)
                 }
             },
-            Err(e) => {
-                error!("Failed to connect to WebSocket: {}", e);
-            }
+            Err(e) => error!("Failed to connect to WebSocket: {}", e)
         }
 
         warn!("Reconnecting in 5 seconds...");
