@@ -43,6 +43,16 @@ graph TD
 *   **Async**: The listener never blocks. It dumps events into a buffer and keeps listening while the processor handles the Discord API calls.
 *   **Resilient**: If the socket drops, it just reconnects automatically.
 
+## Demo
+
+### Terminal Logs
+Clean, human-readable logs showing accepted and rejected tokens.
+![Terminal Logs](assets/terminal.png)
+
+### Discord Alerts
+Rich embeds with Ticker, Name, Dev Spend, and quick links.
+![Discord Alerts](assets/discord.png)
+
 ## Setup
 
 1.  Clone the repo.
